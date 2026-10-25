@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Free calculator and converter: math with brackets, binary, octal, decimal, hexadecimal, text and Unicode.">
+<title>Combined Calculator</title>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--text:#1d2433;--muted:#667085;--accent:#2f6fed;--on-accent:#fff;--border:#d9dee8;--err:#c0352b;--ok:#17734a;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root{--bg:#12151c;--card:#1b2030;--text:#e8ebf3;--muted:#9aa3b5;--accent:#6c9bff;--on-accent:#0d1220;--border:#2f3650;--err:#ff8a80;--ok:#6fd8a0}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;justify-content:center;padding:16px}
+main{width:100%;max-width:520px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:20px;margin-bottom:16px}
+h1{font-size:1.3rem;margin:0 0 4px}h2{font-size:1rem;margin:0}
+.sub,.hint,footer{color:var(--muted);font-size:.85rem}
+.sub{margin:0 0 14px}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+button{font:inherit;cursor:pointer}
+.tab{padding:8px 12px;border:1px solid var(--border);background:transparent;color:var(--text);border-radius:999px;font-size:.85rem}
+.tab[aria-selected=true]{background:var(--accent);color:var(--on-accent);border-color:var(--accent);font-weight:600}
+label{display:block;font-size:.9rem;color:var(--muted);margin-bottom:6px}
+input,select{width:100%;padding:12px;border:1px solid var(--border);border-radius:10px;font:inherit;background:var(--bg);color:var(--text)}
+select{margin-top:8px}
+.row{display:flex;gap:8px;margin-top:12px}
+.btn{flex:1;padding:12px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--text);font-weight:600}
+.btn.main{flex:2;background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.out{margin-top:14px;padding:12px;border:1px solid var(--border);border-radius:10px;min-height:46px;font-family:ui-monospace,Consolas,monospace;font-size:.95rem}
+.out.err{color:var(--err)}
+.line{display:flex;gap:10px;padding:3px 0}.line b{min-width:84px;color:var(--muted);font-weight:600}.line span{word-break:break-all;color:var(--ok)}
+.head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.link{background:none;border:0;color:var(--accent);padding:4px}
+#hist{list-style:none;margin:0;padding:0}
+#hist button{width:100%;text-align:left;padding:8px;border:0;border-bottom:1px solid var(--border);background:none;color:var(--text);font-family:ui-monospace,Consolas,monospace;font-size:.85rem;word-break:break-all}
+#hist small{color:var(--muted)}
+footer{text-align:center;padding-bottom:8px}
+</style>
+</head>
+<body>
+<main>
+<div class="card">
+<h1>Combined Calculator</h1>
+<p class="sub">Math, number bases, text and Unicode in one place.</p>
+<div class="tabs" role="tablist" id="tabs"></div>
+<label id="lbl" for="inp"></label>
+<input id="inp" autocomplete="off" spellcheck="false" maxlength="500">
+<select id="base" aria-label="Base of the number">
+<option value="10">Decimal (base 10)</option><option value="2">Binary (base 2)</option>
+<option value="8">Octal (base 8)</option><option value="16">Hexadecimal (base 16)</option>
+</select>
+<div class="row">
+<button class="btn main" id="go">Calculate</button>
+<button class="btn" id="clr">Clear</button>
+<button class="btn" id="cpy">Copy</button>
+</div>
+<div class="out" id="out" role="status" aria-live="polite"></div>
+<p class="hint" id="tip"></p>
+</div>
+<div class="card">
+<div class="head"><h2>History</h2><button class="link" id="clh">Clear history</button></div>
+<ul id="hist"></ul>
+</div>
+<footer><h1>Calculations made simple.</h1></footer>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const MODES = {
+  math:{tab:'Math',label:'Enter a math expression:',ph:'e.g. 2(3+4)^2',tip:'Performs basic maths.',btn:'Calculate',run:doMath},
+  base:{tab:'Bases',label:'Enter an integer and choose its base:',ph:'e.g. 255 or FF',tip:'Shows binary, octal, decimal and hexadecimal together. Negatives work.',btn:'Convert',run:doBase},
+  text:{tab:'Text',label:'Enter text to convert:',ph:'e.g. Hi',tip:'Each character is shown as its code in binary, octal, decimal and hex.',btn:'Convert',run:doText},
+  char:{tab:'Char → Code',label:'Enter one character:',ph:'e.g. A',tip:'Gives the Unicode code point of the character.',btn:'Convert',run:doChar},
+  code:{tab:'Code → Char',label:'Enter a code (0 to 1114111):',ph:'e.g. 65, 0x41, 0o101 or 0b1000001',tip:'Decimal by default, or use a 0x, 0o or 0b prefix.',btn:'Convert',run:doCode}
+};
+let mode = 'math', lastText = '', history = [];
+
+/* ---------- safe math parser (no eval, no Function) ---------- */
+function tokenize(s){
+  s = s.replace(/[\[{]/g,'(').replace(/[\]}]/g,')').replace(/\*\*/g,'^').replace(/×/g,'*').replace(/÷/g,'/');
+  const out = [], re = /\s*(\d+\.?\d*|\.\d+|[-+*\/%^()])/y;
+  let i = 0, m;
+  while(i < s.length){
+    re.lastIndex = i; m = re.exec(s);
+    if(!m){
+      if(/^\s*$/.test(s.slice(i))) break;
+      throw new Error('Unexpected character: ' + s.slice(i).trim()[0] + '. Use numbers, + - * / % ^ and brackets only.');
+    }
+    out.push(m[1]); i = re.lastIndex;
+  }
+  return out;
+}
+function evaluate(t){
+  let p = 0;
+  const peek = () => t[p], isNum = x => x !== undefined && /^[\d.]/.test(x);
+  function expr(){
+    let v = term();
+    while(peek() === '+' || peek() === '-'){ const op = t[p++], r = term(); v = op === '+' ? v + r : v - r; }
+    return v;
+  }
+  function term(){
+    let v = unary();
+    for(;;){
+      const x = peek();
+      if(x === '*' || x === '/' || x === '%'){
+        p++; const r = unary();
+        if((x === '/' || x === '%') && r === 0) throw new Error('You cannot divide by zero.');
+        v = x === '*' ? v * r : x === '/' ? v / r : v % r;
+      } else if(isNum(x) || x === '('){ v *= power(); }
+      else break;
+    }
+    return v;
+  }
+  function unary(){
+    if(peek() === '-'){ p++; return -unary(); }
+    if(peek() === '+'){ p++; return unary(); }
+    return power();
+  }
+  function power(){ const b = primary(); if(peek() === '^'){ p++; return Math.pow(b, unary()); } return b; }
+  function primary(){
+    const x = t[p++];
+    if(x === undefined) throw new Error('The expression ended unexpectedly.');
+    if(isNum(x)) return Number(x);
+    if(x === '('){ const v = expr(); if(t[p++] !== ')') throw new Error('Missing closing bracket.'); return v; }
+    throw new Error('Unexpected ' + x + '. Check your operators and brackets.');
+  }
+  const v = expr();
+  if(p < t.length) throw new Error(t[p] === ')' ? 'Extra closing bracket.' : 'Check your operators and brackets.');
+  return v;
+}
+function doMath(v){
+  v = v.trim();
+  if(!v) throw new Error('You did not enter anything.');
+  const r = evaluate(tokenize(v));
+  if(Number.isNaN(r)) throw new Error('The result is not a real number.');
+  if(!Number.isFinite(r)) throw new Error('The result is too large.');
+  return [['Result', String(parseFloat(r.toPrecision(12)))]];
+}
+
+/* ---------- converters ---------- */
+const DIGITS = {2:/^[01]+$/,8:/^[0-7]+$/,10:/^\d+$/,16:/^[0-9a-f]+$/i};
+const PREFIX = {2:'0b',8:'0o',16:'0x'};
+function bigFrom(str, b){
+  let s = str.trim().replace(/[_\s]/g,''), neg = false;
+  if(!s) throw new Error('You did not enter anything.');
+  if(s[0] === '-' || s[0] === '+'){ neg = s[0] === '-'; s = s.slice(1); }
+  if(PREFIX[b] && s.slice(0,2).toLowerCase() === PREFIX[b]) s = s.slice(2);
+  if(!DIGITS[b].test(s)) throw new Error('"' + str.trim() + '" is not a valid base-' + b + ' number.');
+  const n = BigInt((PREFIX[b] || '') + s);
+  return neg ? -n : n;
+}
+function doBase(v){
+  const n = bigFrom(v, Number($('base').value));
+  return [['Binary', n.toString(2)],['Octal', n.toString(8)],['Decimal', n.toString(10)],['Hex', n.toString(16).toUpperCase()]];
+}
+function doText(v){
+  if(!v) throw new Error('You did not enter anything.');
+  const cps = [...v].map(c => c.codePointAt(0));
+  const f = (b, w) => cps.map(c => c.toString(b).padStart(w,'0')).join(' ');
+  return [['Binary', f(2,8)],['Octal', f(8,3)],['Decimal', f(10,1)],['Hex', f(16,2).toUpperCase()]];
+}
+function doChar(v){
+  const c = [...v];
+  if(c.length !== 1) throw new Error('Enter exactly one character.');
+  const n = c[0].codePointAt(0);
+  return [['Character', c[0]],['Unicode','U+' + n.toString(16).toUpperCase().padStart(4,'0')],['Decimal', String(n)],['Binary', n.toString(2)],['Octal', n.toString(8)],['Hex', n.toString(16).toUpperCase()]];
+}
+function doCode(v){
+  v = v.trim();
+  let b = 10, s = v;
+  const pre = v.slice(0,2).toLowerCase();
+  if(pre === '0x') b = 16; else if(pre === '0o') b = 8; else if(pre === '0b') b = 2;
+  const n = bigFrom(s, b);
+  if(n < 0n || n > 1114111n) throw new Error('Enter a code between 0 and 1114111.');
+  const k = Number(n);
+  if(k >= 0xD800 && k <= 0xDFFF) throw new Error('That code is a reserved surrogate, not a real character.');
+  const ch = (k < 32 || k === 127) ? '(non-printing control character)' : String.fromCodePoint(k);
+  return [['Character', ch],['Unicode','U+' + k.toString(16).toUpperCase().padStart(4,'0')]];
+}
+
+/* ---------- UI ---------- */
+function render(lines, isErr){
+  const o = $('out'); o.replaceChildren(); o.className = 'out' + (isErr ? ' err' : '');
+  if(isErr){ o.textContent = 'Error: ' + lines; lastText = ''; return; }
+  lines.forEach(([k, val]) => {
+    const d = document.createElement('div'); d.className = 'line';
+    const b = document.createElement('b'); b.textContent = k;
+    const s = document.createElement('span'); s.textContent = val;
+    d.append(b, s); o.append(d);
+  });
+  lastText = lines.map(l => l[1]).join('\n');
+}
+function setMode(m, keep){
+  mode = m; const c = MODES[m];
+  document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', t.dataset.mode === m));
+  $('lbl').textContent = c.label; $('inp').placeholder = c.ph; $('tip').textContent = c.tip; $('go').textContent = c.btn;
+  $('base').style.display = m === 'base' ? '' : 'none';
+  if(!keep) clearAll();
+  $('inp').focus();
+}
+function clearAll(){ $('inp').value = ''; $('out').replaceChildren(); $('out').className = 'out'; lastText = ''; }
+function go(){
+  const input = $('inp').value;
+  try{
+    const res = MODES[mode].run(input);
+    render(res, false);
+    addHistory({mode, input, base: $('base').value, result: res[0][1]});
+  }catch(e){ render(e.message, true); }
+}
+function addHistory(h){
+  history = history.filter(x => !(x.mode === h.mode && x.input === h.input && x.base === h.base));
+  history.unshift(h); history = history.slice(0, 20);
+  try{ localStorage.setItem('cc-history', JSON.stringify(history)); }catch(_){}
+  drawHistory();
+}
+function drawHistory(){
+  const ul = $('hist'); ul.replaceChildren();
+  if(!history.length){ const li = document.createElement('li'); li.className = 'hint'; li.textContent = 'Nothing here yet. Your calculations will appear here.'; ul.append(li); return; }
+  history.forEach(h => {
+    const li = document.createElement('li'), b = document.createElement('button');
+    const sm = document.createElement('small'); sm.textContent = MODES[h.mode].tab + ': ';
+    b.append(sm, document.createTextNode(h.input + '  =  ' + h.result));
+    b.addEventListener('click', () => {
+      if(h.mode === 'base') $('base').value = h.base;
+      setMode(h.mode, true); $('inp').value = h.input; go();
+    });
+    li.append(b); ul.append(li);
+  });
+}
+Object.keys(MODES).forEach(k => {
+  const b = document.createElement('button');
+  b.className = 'tab'; b.dataset.mode = k; b.setAttribute('role','tab'); b.textContent = MODES[k].tab;
+  b.addEventListener('click', () => setMode(k)); $('tabs').append(b);
+});
+$('go').addEventListener('click', go);
+$('clr').addEventListener('click', () => { clearAll(); $('inp').focus(); });
+$('cpy').addEventListener('click', async () => {
+  if(!lastText) return;
+  try{ await navigator.clipboard.writeText(lastText); $('cpy').textContent = 'Copied!'; }
+  catch(_){ $('cpy').textContent = 'Copy failed'; }
+  setTimeout(() => $('cpy').textContent = 'Copy', 1200);
+});
+$('clh').addEventListener('click', () => { history = []; try{ localStorage.removeItem('cc-history'); }catch(_){} drawHistory(); });
+$('inp').addEventListener('keydown', e => { if(e.key === 'Enter') go(); if(e.key === 'Escape') clearAll(); });
+try{ const h = JSON.parse(localStorage.getItem('cc-history') || '[]'); if(Array.isArray(h)) history = h.filter(x => x && MODES[x.mode]).slice(0,20); }catch(_){}
+drawHistory(); setMode('math');
+</script>
+</body>
+</html>
