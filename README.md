@@ -13,4 +13,4 @@ What it does
 
 Run it
 
-Click`index2.html` to open it in your browser. 
+Click`index.html` to open it in your browser. 
